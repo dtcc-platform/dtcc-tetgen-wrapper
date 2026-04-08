@@ -53,7 +53,7 @@ The adapter targets manifold triangle surfaces (PLC input). You can either reque
 
 ```python
 import numpy as np
-from dtcc_tetgen_wrapper import switches, tetrahedralize, TetwrapIO
+from dtcc_tetgen_wrapper import TetwrapIO, tetrahedralize, switches
 
 vertices = np.array(
     [
@@ -71,18 +71,13 @@ vertices = np.array(
 
 faces = np.array(
     [
-        [0, 1, 2], [0, 2, 3],
-        [4, 5, 6], [4, 6, 7],
-        [0, 1, 5], [0, 5, 4],
-        [1, 2, 6], [1, 6, 5],
-        [2, 3, 7], [2, 7, 6],
-        [3, 0, 4], [3, 4, 7],
+        [0, 1, 2],
+        [0, 2, 3],
     ],
     dtype=np.int64,
 )
 
 boundary_facets = {
-    "bottom": [0, 1, 2, 3],
     "top": [4, 5, 6, 7],
     "south": [0, 1, 5, 4],
     "north": [2, 3, 7, 6],
@@ -90,13 +85,12 @@ boundary_facets = {
     "west": [3, 0, 4, 7],
 }
 
-switches = switches.build_tetgen_switches(
+switch_string = switches.build_tetgen_switches(
     params={
         "plc": True,
-        "quality": 1.6,         # triangle quality (radius-edge ratio)
-        "max_volume": 0.02,     # enforce target tetra volume
-        "output_faces": True,
-        "output_neighbors": True,
+        "quality": 1.6,      # tet quality (radius-edge ratio)
+        "max_volume": 0.02,  # target tetra volume
+        "quiet": True,
     }
 )
 
@@ -104,23 +98,40 @@ mesh: TetwrapIO = tetrahedralize(
     vertices,
     faces,
     boundary_facets,
-    switches_params= switches
+    tetgen_switches=switch_string,
     return_io=True,
 )
 
-points = mesh.points                # (N, 3)
-tets = mesh.tets                    # (K, 4)
-boundary_triangles = mesh.tri_faces # (B, 3)
+points = mesh.points                         # (N, 3)
+tets = mesh.tets                             # (K, 4)
+boundary_triangles = mesh.boundary_tri_faces # (B, 3)
+used_switches = mesh.switches                # effective TetGen switch string
 ```
 
-For basic `(points, tets)` output set `return_io=False`. Switch toggles are described in `switches.py`.
+`faces` and `boundary_facets` jointly define the PLC. Do not describe the same
+surface patch twice, for example by triangulating a wall in `faces` and also
+listing that wall again in `boundary_facets`.
+
+For structured switch input, skip `tetgen_switches=` and pass:
+
+```python
+mesh = tetrahedralize(
+    vertices,
+    faces,
+    boundary_facets,
+    switches_params={"quality": (1.6, 25.0), "max_volume": 0.02},
+    switches_overrides={"quiet": True},
+)
+```
+
+For basic `(points, tets, ...)` tuple output set `return_io=False`.
 
 ## Features
 
 - ✅ **High-level mesh API**: Call `tetrahedralize()` with NumPy arrays to obtain tetrahedra, faces, edges, markers, and neighbor connectivity in one shot
 - ✅ **Switch builder**: Describe TetGen command-line switches with expressive Python keywords via `switches.build_tetgen_switches()`
 - ✅ **Marker normalization**: `TetwrapIO` converts TetGen's 1-based boundary markers into zero-based arrays for Python tooling
-- ✅ **Zero-copy arrays**: Access TetGen output buffers without redundant copies or conversions
+- ✅ **NumPy-first outputs**: Access TetGen output through ready-to-use NumPy arrays
 - ✅ **Quality & sizing controls**: Configure radius-edge ratios, dihedral angles, and per-region volume targets programmatically
 - ✅ **Vendored TetGen sources**: Wheels bundle vetted TetGen code; source builds pull it in automatically using `vendor_tetgen.sh`
 
@@ -140,35 +151,39 @@ For basic `(points, tets)` output set `return_io=False`. Switch toggles are desc
 
 ## APIs
 
-### `tetrahedralize(vertices, faces, boundary_facets, …)`: 
+### `tetrahedralize(vertices, faces, boundary_facets, …)`:
 Run TetGen on a Piecewise Linear Complex (PLC) and return a `TetwrapIO` wrapper or raw arrays.
 
 ```python
 def tetrahedralize(
-    V: np.ndarray,
-    F: Optional[np.ndarray] = None,
-    boundary_facets: Optional[Dict[str, List[List[int]]]] = None,
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    boundary_facets: Union[Sequence[Sequence[int]], Mapping[str, Sequence[int]]],
     *,
-    return_io: bool = False,
+    face_markers: Optional[Sequence[int]] = None,
+    switches_params: Optional[Mapping[str, Any]] = None,
+    switches_overrides: Optional[Mapping[str, Any]] = None,
+    tetgen_switches: Optional[Union[str, bytes, np.ndarray]] = None,
+    interior_default: int = -10,
+    return_io: bool = True,
     return_faces: bool = False,
+    return_boundary_faces: bool = False,
     return_edges: bool = False,
     return_neighbors: bool = False,
-    return_boundary: bool = False,
-    interior_default: int = -10,
-    tetgen_switches: Optional[str] = None,
-    **kwargs
 ) -> Union[Tuple[np.ndarray, ...], TetwrapIO]
 ```
 
 **Parameters:**
-- `V`: (N, 3) array of vertex coordinates
-- `F`: Optional (M, 3) or (M, 4) array of face indices
-- `boundary_facets`: Dictionary mapping boundary names to face lists
-- `return_io`: If True, return TetwrapIO object instead of tuple
-- `return_faces/edges/neighbors/boundary`: Control which outputs to include
+- `vertices`: `(N, 3)` array of vertex coordinates
+- `faces`: `(M, 3)` array of triangle indices
+- `boundary_facets`: Boundary polygons, either as a list of polygons or a mapping from names to polygons
+- `face_markers`: Optional face markers aligned with `faces`
+- `switches_params`: Structured TetGen switch parameters
+- `switches_overrides`: Structured TetGen switch overrides applied after `switches_params`
+- `tetgen_switches`: Raw TetGen switch string/bytes/byte-array; mutually exclusive with structured switch inputs
 - `interior_default`: Marker value for interior (non-boundary) faces
-- `tetgen_switches`: Raw TetGen switch string (overrides kwargs)
-- `**kwargs`: TetGen parameters (quality, max_volume, etc.)
+- `return_io`: If True, return a `TetwrapIO`
+- `return_faces/return_boundary_faces/return_edges/return_neighbors`: Request optional TetGen outputs
 
 
 - **`TetwrapIO`**: Lightweight accessor exposing `points`, `tets`, `tri_faces`, `boundary_tri_faces`, `neighbors`, `edges`, and marker normalization helpers.

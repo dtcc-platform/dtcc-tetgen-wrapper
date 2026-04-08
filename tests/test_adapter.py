@@ -107,6 +107,39 @@ def test_returns_tetwrap_io_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["return_boundary_faces"] is False
 
 
+def test_raw_switch_string_is_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raw TetGen switch string can be supplied directly."""
+    dummy_result = _DummyTetwrapResult()
+    captured = {}
+
+    def _fake_tetrahedralize(V, F, F_markers, B, switch_str, ret_boundary):
+        captured["switch_str"] = switch_str
+        return dummy_result
+
+    monkeypatch.setattr(adapter._tetwrap, "_tetrahedralize", _fake_tetrahedralize)
+
+    adapter.tetrahedralize(
+        _vertices(),
+        _faces(),
+        _boundary(),
+        tetgen_switches="pQq1.6a0.1",
+    )
+
+    assert captured["switch_str"] == "pQq1.6a0.1"
+
+
+def test_raw_switch_string_conflicts_with_structured_switches() -> None:
+    """Raw and structured switch inputs are mutually exclusive."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        adapter.tetrahedralize(
+            _vertices(),
+            _faces(),
+            _boundary(),
+            tetgen_switches="pQ",
+            switches_params={"quality": 2.0},
+        )
+
+
 def test_requesting_outputs_sets_switches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Requesting faces/edges/neighbors toggles the associated TetGen switches."""
     dummy_result = _DummyTetwrapResult()
@@ -141,3 +174,42 @@ def test_requesting_outputs_sets_switches(monkeypatch: pytest.MonkeyPatch) -> No
     assert isinstance(boundary_markers, np.ndarray)
     # Markers are normalized: 0 -> default (-10), positives are shifted down.
     assert set(boundary_markers.tolist()) == {-10, 1}
+
+
+def test_native_box_smoke_reports_effective_switches() -> None:
+    """A small valid PLC tetrahedralizes through the compiled extension."""
+    vertices = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ],
+        dtype=float,
+    )
+    faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    boundary = {
+        "south": [0, 1, 6, 4],
+        "east": [1, 2, 7, 6],
+        "north": [2, 3, 5, 7],
+        "west": [3, 0, 4, 5],
+        "top": [4, 6, 7, 5],
+    }
+
+    io = adapter.tetrahedralize(
+        vertices,
+        faces,
+        boundary,
+        tetgen_switches="pQ",
+        return_boundary_faces=True,
+    )
+
+    assert io.points.shape[1] == 3
+    assert io.tets.shape[1] == 4
+    assert io.boundary_tri_faces is not None
+    assert io.boundary_tri_faces.shape[1] == 3
+    assert io.switches == "pQnf"

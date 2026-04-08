@@ -2,6 +2,7 @@
 
 import pytest
 
+import dtcc_tetgen_wrapper
 from dtcc_tetgen_wrapper import build_tetgen_switches, tetgen_defaults
 
 
@@ -41,3 +42,8 @@ def test_build_tetgen_switches_detects_conflicting_options() -> None:
     """Mutually exclusive quiet/verbose flags raise a ValueError."""
     with pytest.raises(ValueError):
         build_tetgen_switches(quiet=True, verbose=True)
+
+
+def test_package_exports_switches_module() -> None:
+    """The package namespace exposes the switches helper module directly."""
+    assert dtcc_tetgen_wrapper.switches.build_tetgen_switches is build_tetgen_switches

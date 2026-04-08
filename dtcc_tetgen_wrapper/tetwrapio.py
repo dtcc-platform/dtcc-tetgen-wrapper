@@ -11,7 +11,7 @@ from . import _tetwrap
 
 @dataclass(slots=True)
 class TetwrapIO:
-    """Lightweight wrapper that keeps TetGen output arrays zero-copy and normalizes markers."""
+    """Lightweight wrapper that exposes TetGen output arrays and normalizes markers."""
 
     _io: _tetwrap.TetwrapIO
     interior_default: Optional[int] = -10

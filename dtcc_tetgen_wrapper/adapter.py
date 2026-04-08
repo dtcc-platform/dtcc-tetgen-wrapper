@@ -6,7 +6,7 @@ Inputs are plain NumPy arrays and Python lists — no dtcc dependency.
 """
 from __future__ import annotations
 
-from typing import List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -17,6 +17,7 @@ BoundaryFacets = Union[
     Sequence[Sequence[int]],
     Mapping[str, Sequence[int]],
 ]
+RawTetgenSwitches = Union[str, bytes, np.ndarray]
 
 
 def _ensure_ndarray(vertices: np.ndarray, faces: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -71,8 +72,9 @@ def tetrahedralize(
     boundary_facets: BoundaryFacets,
     *,
     face_markers: Optional[Sequence[int]] = None,
-    switches_params: Optional[dict] = None,
-    switches_overrides: Optional[dict] = None,
+    switches_params: Optional[Mapping[str, Any]] = None,
+    switches_overrides: Optional[Mapping[str, Any]] = None,
+    tetgen_switches: Optional[RawTetgenSwitches] = None,
     interior_default: Optional[int] = -10,
     return_io: bool = True,
     return_faces: bool = False,
@@ -93,9 +95,19 @@ def tetrahedralize(
 ]:
     """
     Run TetGen on a PLC defined by `faces` (triangles) + `boundary_facets` (polygons).
+
+    The two inputs are complementary: together they should describe the PLC
+    boundary, without repeating the same geometric facet in both forms.
     """
     V, F = _ensure_ndarray(vertices, faces)
     B = _normalize_boundary_facets(boundary_facets)
+
+    if tetgen_switches is not None and (
+        switches_params is not None or switches_overrides is not None
+    ):
+        raise ValueError(
+            "tetgen_switches is mutually exclusive with switches_params and switches_overrides"
+        )
 
     F_markers = None
     if face_markers is not None:
@@ -105,18 +117,29 @@ def tetrahedralize(
         if F_markers.shape[0] != F.shape[0]:
             raise ValueError("face_markers must have the same length as faces")
 
-    s_params = dict(switches_params or {})
-    if return_faces or return_boundary_faces:
-        s_params["output_faces"] = True
-    if return_edges:
-        s_params["output_edges"] = True
-    if return_neighbors or return_boundary_faces:
-        s_params["output_neighbors"] = True
+    tetgen_switch_input: RawTetgenSwitches
+    if tetgen_switches is not None:
+        tetgen_switch_input = tetgen_switches
+    else:
+        s_params = dict(switches_params or {})
+        if return_faces or return_boundary_faces:
+            s_params["output_faces"] = True
+        if return_edges:
+            s_params["output_edges"] = True
+        if return_neighbors or return_boundary_faces:
+            s_params["output_neighbors"] = True
 
-    s_over = switches_overrides or {}
-    switch_str = switches.build_tetgen_switches(params=s_params, **s_over)
+        s_over = dict(switches_overrides or {})
+        tetgen_switch_input = switches.build_tetgen_switches(params=s_params, **s_over)
 
-    raw_io = _tetwrap._tetrahedralize(V, F, F_markers, B, switch_str, return_boundary_faces)
+    raw_io = _tetwrap._tetrahedralize(
+        V,
+        F,
+        F_markers,
+        B,
+        tetgen_switch_input,
+        return_boundary_faces,
+    )
     io = TetwrapIO(raw_io, interior_default=interior_default)
 
     if return_io:

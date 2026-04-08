@@ -21,6 +21,7 @@ namespace py = pybind11;
 // ===================== Helper conversions =====================
 static py::array_t<double> to_array_f64(const REAL* src, int n, int m)
 {
+    if (n == 0 && m > 0) return py::array_t<double>({0, m});
     if (!src || n <= 0 || m <= 0) return py::array_t<double>();
     py::array_t<double> A({n, m});
     auto a = A.mutable_unchecked<2>();
@@ -32,6 +33,7 @@ static py::array_t<double> to_array_f64(const REAL* src, int n, int m)
 
 static py::array_t<int> to_array_i32(const int* src, int n, int m)
 {
+    if (n == 0 && m > 0) return py::array_t<int>({0, m});
     if (!src || n <= 0 || m <= 0) return py::array_t<int>();
     py::array_t<int> A({n, m});
     auto a = A.mutable_unchecked<2>();
@@ -43,6 +45,7 @@ static py::array_t<int> to_array_i32(const int* src, int n, int m)
 
 static py::array_t<int> to_vector_i32(const int* src, int n)
 {
+    if (n == 0) return py::array_t<int>({0});
     if (!src || n <= 0) return py::array_t<int>();
     py::array_t<int> A({n});
     auto a = A.mutable_unchecked<1>();
@@ -53,6 +56,7 @@ static py::array_t<int> to_vector_i32(const int* src, int n)
 
 static py::array_t<double> to_vector_f64(const REAL* src, int n)
 {
+    if (n == 0) return py::array_t<double>({0});
     if (!src || n <= 0) return py::array_t<double>();
     py::array_t<double> A({n});
     auto a = A.mutable_unchecked<1>();
@@ -61,7 +65,14 @@ static py::array_t<double> to_vector_f64(const REAL* src, int n)
     return A;
 }
 
-// Write vertices and faces to CSV-ish files for debugging.
+static std::string switch_buffer_to_string(const std::vector<char>& sw)
+{
+    if (sw.empty()) return std::string();
+    const bool has_nul = sw.back() == '\0';
+    return std::string(sw.begin(), sw.begin() + static_cast<std::ptrdiff_t>(sw.size() - (has_nul ? 1 : 0)));
+}
+
+// Write vertices, faces, and boundary facets to files for debugging.
 static std::string dump_plc(const py::array_t<double, py::array::c_style | py::array::forcecast>& vertices,
                             const py::array_t<int,    py::array::c_style | py::array::forcecast>& mesh_facets,
                             const std::vector<std::vector<int>>& boundary_facets,
@@ -72,6 +83,40 @@ static std::string dump_plc(const py::array_t<double, py::array::c_style | py::a
     try {
         auto V = vertices.unchecked<2>();
         auto F = mesh_facets.unchecked<2>();
+
+        const std::string poly_path = prefix + ".poly";
+        std::ofstream pout(poly_path);
+        if (pout) {
+            pout << V.shape(0) << " 3 0 0\n";
+            pout << std::setprecision(17);
+            for (ssize_t i = 0; i < V.shape(0); ++i) {
+                pout << (i + 1) << ' '
+                     << V(i, 0) << ' '
+                     << V(i, 1) << ' '
+                     << V(i, 2) << '\n';
+            }
+
+            const ssize_t num_facets = F.shape(0) + static_cast<ssize_t>(boundary_facets.size());
+            pout << num_facets << " 0\n";
+            for (ssize_t i = 0; i < F.shape(0); ++i) {
+                pout << "1 0\n";
+                pout << "3 "
+                     << (F(i, 0) + 1) << ' '
+                     << (F(i, 1) + 1) << ' '
+                     << (F(i, 2) + 1) << '\n';
+            }
+            for (const auto& poly : boundary_facets) {
+                pout << "1 0\n";
+                pout << poly.size();
+                for (int vid : poly) {
+                    pout << ' ' << (vid + 1);
+                }
+                pout << '\n';
+            }
+            pout << "0\n";
+            pout << "0\n";
+            written.push_back(poly_path);
+        }
 
         const std::string v_path = prefix + "_vertices.csv";
         std::ofstream vout(v_path);
@@ -399,11 +444,7 @@ static TetwrapIO tetrahedralize_core(
         }
 
         // Reconstruct switch string (strip trailing NUL if present)
-        std::string sw_str;
-        if (!sw.empty()) {
-            const bool has_nul = sw.back() == '\0';
-            sw_str.assign(sw.begin(), sw.begin() + static_cast<std::ptrdiff_t>(sw.size() - (has_nul ? 1 : 0)));
-        }
+        const std::string sw_str = switch_buffer_to_string(sw);
 
         // Basic input summary
         std::ostringstream summary;
@@ -428,14 +469,34 @@ static TetwrapIO tetrahedralize_core(
         throw std::runtime_error("TetGen failed with an unknown error. This may be due to invalid input geometry or incompatible switches.");
     }
 
+    if (out.numberoftetrahedra <= 0 || out.tetrahedronlist == nullptr) {
+        std::ostringstream summary;
+        summary << "TetGen returned no tetrahedra"
+                << " | switches=\"" << switch_buffer_to_string(sw) << "\""
+                << " | points=" << N
+                << ", mesh_facets=" << M
+                << ", boundary_polys=" << B;
+        const std::string dump_paths = dump_plc(vertices, mesh_facets, boundary_facets, "tetgen_fail");
+        if (!dump_paths.empty()) {
+            summary << " | dump_files=" << dump_paths;
+        }
+        throw std::runtime_error(summary.str());
+    }
+    if (out.numberofcorners != 4) {
+        std::ostringstream summary;
+        summary << "TetGen returned unsupported tetrahedra with "
+                << out.numberofcorners
+                << " corners"
+                << " | switches=\"" << switch_buffer_to_string(sw) << "\"";
+        throw std::runtime_error(summary.str());
+    }
+
     // Populate result
     TetwrapIO res;
     res.points   = to_array_f64(out.pointlist, out.numberofpoints, 3);
     res.tets     = to_array_i32(out.tetrahedronlist, out.numberoftetrahedra, out.numberofcorners);
     res.corners  = out.numberofcorners;
-    // reconstruct switch string if provided as array
-    if (py::isinstance<py::str>(tetgen_switches)) res.switches = py::cast<std::string>(tetgen_switches);
-    else res.switches = ""; // optional
+    res.switches = switch_buffer_to_string(sw);
 
     // Output Faces (-f)
     if (out.numberoftrifaces > 0 && out.trifacelist) {
