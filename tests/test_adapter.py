@@ -75,11 +75,14 @@ def test_returns_tetwrap_io_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     dummy_result = _DummyTetwrapResult()
     captured = {}
 
-    def _fake_tetrahedralize(V, F, F_markers, B, switch_str, ret_boundary):
+    def _fake_tetrahedralize(
+        V, F, F_markers, B, switch_str, ret_boundary, boundary_facet_markers=None
+    ):
         captured["vertices"] = V
         captured["faces"] = F
         captured["face_markers"] = F_markers
         captured["boundary"] = B
+        captured["boundary_facet_markers"] = boundary_facet_markers
         captured["switch_str"] = switch_str
         captured["return_boundary_faces"] = ret_boundary
         return dummy_result
@@ -101,6 +104,7 @@ def test_returns_tetwrap_io_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["faces"].dtype == np.int64
     assert captured["face_markers"].dtype == np.int32
     assert captured["boundary"] == [[0, 1, 2]]
+    assert captured["boundary_facet_markers"] is None
     # Defaults enable PLC (-p) and our quality request adds q2.
     assert "p" in captured["switch_str"]
     assert "q2" in captured["switch_str"]
@@ -112,7 +116,9 @@ def test_raw_switch_string_is_passed_through(monkeypatch: pytest.MonkeyPatch) ->
     dummy_result = _DummyTetwrapResult()
     captured = {}
 
-    def _fake_tetrahedralize(V, F, F_markers, B, switch_str, ret_boundary):
+    def _fake_tetrahedralize(
+        V, F, F_markers, B, switch_str, ret_boundary, boundary_facet_markers=None
+    ):
         captured["switch_str"] = switch_str
         return dummy_result
 
@@ -145,7 +151,9 @@ def test_requesting_outputs_sets_switches(monkeypatch: pytest.MonkeyPatch) -> No
     dummy_result = _DummyTetwrapResult()
     called = {}
 
-    def _fake_tetrahedralize(V, F, F_markers, B, switch_str, ret_boundary):
+    def _fake_tetrahedralize(
+        V, F, F_markers, B, switch_str, ret_boundary, boundary_facet_markers=None
+    ):
         called["switch_str"] = switch_str
         called["return_boundary_faces"] = ret_boundary
         return dummy_result
@@ -176,6 +184,79 @@ def test_requesting_outputs_sets_switches(monkeypatch: pytest.MonkeyPatch) -> No
     assert set(boundary_markers.tolist()) == {-10, 1}
 
 
+def test_named_boundary_facets_follow_dtcc_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Named bbox facets normalize to the dtcc face-marker order."""
+    dummy_result = _DummyTetwrapResult()
+    captured = {}
+
+    def _fake_tetrahedralize(
+        V, F, F_markers, B, switch_str, ret_boundary, boundary_facet_markers=None
+    ):
+        captured["boundary"] = B
+        return dummy_result
+
+    monkeypatch.setattr(adapter._tetwrap, "_tetrahedralize", _fake_tetrahedralize)
+
+    adapter.tetrahedralize(
+        _vertices(),
+        _faces(),
+        {
+            "south": [0, 1, 2],
+            "east": [0, 1, 3],
+            "north": [0, 2, 3],
+            "west": [1, 2, 3],
+            "top": [0, 1, 2, 3],
+        },
+        tetgen_switches="pQ",
+    )
+
+    assert captured["boundary"] == [
+        [0, 1, 2, 3],
+        [1, 2, 3],
+        [0, 1, 3],
+        [0, 1, 2],
+        [0, 2, 3],
+    ]
+
+
+def test_boundary_facet_markers_follow_normalized_named_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Named boundary facet markers are aligned with the normalized facet order."""
+    dummy_result = _DummyTetwrapResult()
+    captured = {}
+
+    def _fake_tetrahedralize(
+        V, F, F_markers, B, switch_str, ret_boundary, boundary_facet_markers=None
+    ):
+        captured["boundary_facet_markers"] = boundary_facet_markers
+        return dummy_result
+
+    monkeypatch.setattr(adapter._tetwrap, "_tetrahedralize", _fake_tetrahedralize)
+
+    adapter.tetrahedralize(
+        _vertices(),
+        _faces(),
+        {
+            "south": [0, 1, 2],
+            "east": [0, 1, 3],
+            "north": [0, 2, 3],
+            "west": [1, 2, 3],
+            "top": [0, 1, 2, 3],
+        },
+        boundary_facet_markers={
+            "south": -5,
+            "east": -4,
+            "north": -6,
+            "west": -3,
+            "top": -2,
+        },
+        tetgen_switches="pQ",
+    )
+
+    assert captured["boundary_facet_markers"].tolist() == [-2, -3, -4, -5, -6]
+
+
 def test_native_box_smoke_reports_effective_switches() -> None:
     """A small valid PLC tetrahedralizes through the compiled extension."""
     vertices = np.array(
@@ -204,6 +285,13 @@ def test_native_box_smoke_reports_effective_switches() -> None:
         vertices,
         faces,
         boundary,
+        boundary_facet_markers={
+            "south": -5,
+            "east": -4,
+            "north": -6,
+            "west": -3,
+            "top": -2,
+        },
         tetgen_switches="pQ",
         return_boundary_faces=True,
     )
@@ -212,4 +300,5 @@ def test_native_box_smoke_reports_effective_switches() -> None:
     assert io.tets.shape[1] == 4
     assert io.boundary_tri_faces is not None
     assert io.boundary_tri_faces.shape[1] == 3
+    assert set(np.unique(io.boundary_tri_markers)).issuperset({-1, -2, -3, -4, -5, -6})
     assert io.switches == "pQnf"

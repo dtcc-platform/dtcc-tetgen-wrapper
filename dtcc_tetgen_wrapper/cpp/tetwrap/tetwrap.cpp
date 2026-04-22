@@ -273,7 +273,8 @@ static TetwrapIO tetrahedralize_core(
     py::object mesh_facet_markers_obj,
     const std::vector<std::vector<int>> &boundary_facets,
     py::object tetgen_switches,
-    bool compute_boundary_faces = true  )
+    bool compute_boundary_faces = true,
+    py::object boundary_facet_markers_obj = py::none())
 {
     // Basic shape checks
     if (vertices.ndim() != 2 || vertices.shape(1) != 3)
@@ -297,6 +298,16 @@ static TetwrapIO tetrahedralize_core(
         if (mesh_facet_markers.shape(0) != M)
             throw std::runtime_error("mesh_facet_markers length must match number of mesh facets");
         mesh_facet_marker_ptr = mesh_facet_markers.data();
+    }
+    py::array_t<int, py::array::c_style | py::array::forcecast> boundary_facet_markers;
+    const int* boundary_facet_marker_ptr = nullptr;
+    if (!boundary_facet_markers_obj.is_none()) {
+        boundary_facet_markers = boundary_facet_markers_obj.cast<py::array_t<int, py::array::c_style | py::array::forcecast>>();
+        if (boundary_facet_markers.ndim() != 1)
+            throw std::runtime_error("boundary_facet_markers must be a 1D array");
+        if (boundary_facet_markers.shape(0) != B)
+            throw std::runtime_error("boundary_facet_markers length must match number of boundary facets");
+        boundary_facet_marker_ptr = boundary_facet_markers.data();
     }
 
     if (N <= 0) throw std::runtime_error("vertices: N <= 0");
@@ -366,7 +377,7 @@ static TetwrapIO tetrahedralize_core(
         in.facetmarkerlist[fi] = marker_value;
     }
 
-    // Boundary polygons (marker 1..B)
+    // Boundary polygons (explicit markers when provided, otherwise -(bi + 2))
     for (int bi = 0; bi < B; ++bi)
     {
         tetgenio::facet &fac = in.facetlist[M + bi];
@@ -379,7 +390,8 @@ static TetwrapIO tetrahedralize_core(
         poly.numberofvertices = static_cast<int>(loop.size());
         poly.vertexlist = new int[poly.numberofvertices];
         for (int j = 0; j < poly.numberofvertices; ++j) poly.vertexlist[j] = loop[j];
-        in.facetmarkerlist[M + bi] =  - (bi + 2);
+        const int marker_value = boundary_facet_marker_ptr ? boundary_facet_marker_ptr[bi] : -(bi + 2);
+        in.facetmarkerlist[M + bi] = marker_value;
     }
 
     // Build switch buffer (NUL-terminated)
@@ -612,7 +624,14 @@ PYBIND11_MODULE(_tetwrap, m)
              py::array_t<int,    py::array::c_style | py::array::forcecast> mesh_facets,
              const std::vector<std::vector<int>> &boundary_facets,
              py::object tetgen_switches) {
-                TetwrapIO io = tetrahedralize_core(vertices, mesh_facets, py::none(), boundary_facets, tetgen_switches);
+                TetwrapIO io = tetrahedralize_core(
+                    vertices,
+                    mesh_facets,
+                    py::none(),
+                    boundary_facets,
+                    tetgen_switches,
+                    true,
+                    py::none());
                 return std::make_pair(io.points.cast<py::array_t<double>>(), io.tets.cast<py::array_t<int>>());
           },
           py::arg("vertices"),
@@ -632,6 +651,7 @@ PYBIND11_MODULE(_tetwrap, m)
           py::arg("boundary_facets"),
           py::arg("tetgen_switches"),
           py::arg("compute_boundary_faces") = true,
+          py::arg("boundary_facet_markers") = py::none(),
           R"pbdoc(
               Build a TetGen volume mesh and return a TetwrapIO object.
               Use TetGen switches to request faces (-f), edges (-e), neighbors (-n).
