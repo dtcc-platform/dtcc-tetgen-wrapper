@@ -256,7 +256,6 @@ def test_boundary_facet_markers_follow_normalized_named_order(
 
     assert captured["boundary_facet_markers"].tolist() == [-2, -3, -4, -5, -6]
 
-
 def test_native_box_smoke_reports_effective_switches() -> None:
     """A small valid PLC tetrahedralizes through the compiled extension."""
     vertices = np.array(

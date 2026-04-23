@@ -19,6 +19,8 @@ DEFAULT_TETGEN_PARAMS = {
     "sizing_function": None,        # -m{token} or -m if True
     "insert_points": None,          # -i{token} or -i if True
     "optimize_level": None,         # -O{int}
+    "optimize_max_dihedral": None,  # -o/#{deg}
+    "optimize_max_aspect_ratio": None,  # -o//#{ratio}
     "max_added_points": None,       # -S{int}
     "coplanar_tolerance": None,     # -T{float}
 
@@ -208,6 +210,18 @@ def build_tetgen_switches(params: Optional[Dict[str, Any]] = None, **overrides: 
     if O is not None:
         parts.append("O" + _fmt_num(O))
 
+    # -o/#{deg} and -o//#{ratio}
+    opt_max_dihedral = cfg.get("optimize_max_dihedral")
+    opt_max_aspect_ratio = cfg.get("optimize_max_aspect_ratio")
+    if opt_max_dihedral is not None or opt_max_aspect_ratio is not None:
+        o = "o"
+        if opt_max_dihedral is not None:
+            o += "/" + _fmt_num(opt_max_dihedral)
+        if opt_max_aspect_ratio is not None:
+            o += "//" if opt_max_dihedral is not None else "//"
+            o += _fmt_num(opt_max_aspect_ratio)
+        parts.append(o)
+
     # -S{int}
     S = cfg.get("max_added_points")
     if S is not None:
@@ -222,4 +236,3 @@ def build_tetgen_switches(params: Optional[Dict[str, Any]] = None, **overrides: 
         parts.append(cfg["extra"])
 
     return "".join(parts)
-

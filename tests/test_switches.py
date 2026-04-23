@@ -23,6 +23,7 @@ def test_build_tetgen_switches_concatenates_expected_flags() -> None:
             "quality": 2.5,
             "output_faces": True,
             "output_edges": True,
+            "optimize_max_dihedral": 175.0,
         },
         max_volume=0.1,
         quiet=True,
@@ -35,7 +36,18 @@ def test_build_tetgen_switches_concatenates_expected_flags() -> None:
     assert "f" in switches
     assert "e" in switches
     assert "a0.1" in switches
+    assert "o/175" in switches
     assert switches.endswith("XYZ")
+
+
+def test_build_tetgen_switches_formats_optimization_targets() -> None:
+    """Optimization targets should map to TetGen's hidden -o variants."""
+    switches = build_tetgen_switches(
+        optimize_max_dihedral=172.5,
+        optimize_max_aspect_ratio=3.0,
+    )
+
+    assert "o/172.5//3" in switches
     
 
 def test_build_tetgen_switches_detects_conflicting_options() -> None:
