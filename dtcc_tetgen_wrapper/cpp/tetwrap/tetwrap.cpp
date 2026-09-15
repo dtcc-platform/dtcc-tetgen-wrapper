@@ -21,7 +21,7 @@ namespace py = pybind11;
 // ===================== Helper conversions =====================
 static py::array_t<double> to_array_f64(const REAL* src, int n, int m)
 {
-    if (n == 0 && m > 0) return py::array_t<double>({0, m});
+    if (n == 0 && m > 0) return py::array_t<double>(py::array::ShapeContainer{0, m});
     if (!src || n <= 0 || m <= 0) return py::array_t<double>();
     py::array_t<double> A({n, m});
     auto a = A.mutable_unchecked<2>();
@@ -33,7 +33,7 @@ static py::array_t<double> to_array_f64(const REAL* src, int n, int m)
 
 static py::array_t<int> to_array_i32(const int* src, int n, int m)
 {
-    if (n == 0 && m > 0) return py::array_t<int>({0, m});
+    if (n == 0 && m > 0) return py::array_t<int>(py::array::ShapeContainer{0, m});
     if (!src || n <= 0 || m <= 0) return py::array_t<int>();
     py::array_t<int> A({n, m});
     auto a = A.mutable_unchecked<2>();
@@ -89,16 +89,16 @@ static std::string dump_plc(const py::array_t<double, py::array::c_style | py::a
         if (pout) {
             pout << V.shape(0) << " 3 0 0\n";
             pout << std::setprecision(17);
-            for (ssize_t i = 0; i < V.shape(0); ++i) {
+            for (py::ssize_t i = 0; i < V.shape(0); ++i) {
                 pout << (i + 1) << ' '
                      << V(i, 0) << ' '
                      << V(i, 1) << ' '
                      << V(i, 2) << '\n';
             }
 
-            const ssize_t num_facets = F.shape(0) + static_cast<ssize_t>(boundary_facets.size());
+            const py::ssize_t num_facets = F.shape(0) + static_cast<py::ssize_t>(boundary_facets.size());
             pout << num_facets << " 0\n";
-            for (ssize_t i = 0; i < F.shape(0); ++i) {
+            for (py::ssize_t i = 0; i < F.shape(0); ++i) {
                 pout << "1 0\n";
                 pout << "3 "
                      << (F(i, 0) + 1) << ' '
@@ -123,7 +123,7 @@ static std::string dump_plc(const py::array_t<double, py::array::c_style | py::a
         if (vout) {
             vout << "x,y,z\n";
             vout << std::setprecision(17);
-            for (ssize_t i = 0; i < V.shape(0); ++i) {
+            for (py::ssize_t i = 0; i < V.shape(0); ++i) {
                 vout << V(i, 0) << ',' << V(i, 1) << ',' << V(i, 2) << '\n';
             }
             written.push_back(v_path);
@@ -133,7 +133,7 @@ static std::string dump_plc(const py::array_t<double, py::array::c_style | py::a
         std::ofstream fout(f_path);
         if (fout) {
             fout << "v0,v1,v2\n";
-            for (ssize_t i = 0; i < F.shape(0); ++i) {
+            for (py::ssize_t i = 0; i < F.shape(0); ++i) {
                 fout << F(i, 0) << ',' << F(i, 1) << ',' << F(i, 2) << '\n';
             }
             written.push_back(f_path);
@@ -230,7 +230,7 @@ static py::array_t<int> compute_boundary_face_tris(
 
     auto tets = tets_.unchecked<2>();
     auto nbrs = nbrs_.unchecked<2>();
-    const ssize_t T = tets.shape(0);
+    const py::ssize_t T = tets.shape(0);
 
     // local face patterns: face opposite vertex k
     const int faces_of_tet[4][3] = {
@@ -241,18 +241,18 @@ static py::array_t<int> compute_boundary_face_tris(
     };
 
     // First pass: count boundary faces
-    ssize_t B = 0;
-    for (ssize_t i = 0; i < T; ++i)
+    py::ssize_t B = 0;
+    for (py::ssize_t i = 0; i < T; ++i)
         for (int lf = 0; lf < 4; ++lf)
             if (nbrs(i, lf) < 0) ++B;
 
     // Allocate (B,3) int32
-    py::array_t<int> faces({B, (ssize_t)3});
+    py::array_t<int> faces({B, (py::ssize_t)3});
     auto F = faces.mutable_unchecked<2>();
 
     // Second pass: fill
-    ssize_t b = 0;
-    for (ssize_t i = 0; i < T; ++i) {
+    py::ssize_t b = 0;
+    for (py::ssize_t i = 0; i < T; ++i) {
         for (int lf = 0; lf < 4; ++lf) {
             if (nbrs(i, lf) < 0) {
                 const int* pat = faces_of_tet[lf];
@@ -407,7 +407,7 @@ static TetwrapIO tetrahedralize_core(
         py::array_t<uint8_t, py::array::c_style | py::array::forcecast> a = tetgen_switches;
         auto r = a.unchecked<1>();
         sw.resize(r.shape(0) + 1);
-        for (ssize_t i = 0; i < r.shape(0); ++i) sw[i] = static_cast<char>(r(i));
+        for (py::ssize_t i = 0; i < r.shape(0); ++i) sw[i] = static_cast<char>(r(i));
         sw.back() = '\0';
     }
     else
@@ -563,7 +563,7 @@ static TetwrapIO tetrahedralize_core(
             auto faces = boundary_faces.unchecked<2>();
             py::array_t<int> boundary_markers({faces.shape(0)});
             auto markers = boundary_markers.mutable_unchecked<1>();
-            for (ssize_t i = 0; i < faces.shape(0); ++i) {
+            for (py::ssize_t i = 0; i < faces.shape(0); ++i) {
                 std::array<int, 3> key = {faces(i, 0), faces(i, 1), faces(i, 2)};
                 std::sort(key.begin(), key.end());
                 auto it = triface_marker_map.find(key);
