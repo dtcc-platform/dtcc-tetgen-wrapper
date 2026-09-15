@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.24)
 project(tetwrap LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -9,34 +9,21 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Try installed pybind11 first, then fetch if missing
-find_package(pybind11 CONFIG QUIET)
-if(NOT pybind11_FOUND)
-  include(FetchContent)
-  FetchContent_Declare(
-    pybind11
-    GIT_REPOSITORY https://github.com/pybind/pybind11.git
-    GIT_TAG        v2.12.0
-  )
-  FetchContent_MakeAvailable(pybind11)
-endif()
+find_package(pybind11 CONFIG REQUIRED)
 
-# Locate TetGen sources one level up
-set(TETGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tetgen")
-
-if(NOT EXISTS "${TETGEN_DIR}/tetgen.cxx")
-  message(FATAL_ERROR "tetgen.cxx not found at ${TETGEN_DIR} (expected ../tetgen)")
-endif()
-if(NOT EXISTS "${TETGEN_DIR}/tetgen.h")
-  message(FATAL_ERROR "tetgen.h not found at ${TETGEN_DIR}")
-endif()
-
-set(TETGEN_SOURCES "${TETGEN_DIR}/tetgen.cxx")
-if(EXISTS "${TETGEN_DIR}/predicates.cxx")
-  list(APPEND TETGEN_SOURCES "${TETGEN_DIR}/predicates.cxx")
-else()
-  message(WARNING "predicates.cxx not found; robust predicates may be missing.")
-endif()
+# Canonical TetGen source pin. Fetch only into the build tree; never use a
+# developer's ignored vendor directory or accept an unchecked download.
+include(FetchContent)
+FetchContent_Declare(tetgen
+  URL https://codeberg.org/TetGen/TetGen/archive/v1.6.0.tar.gz
+  URL_HASH SHA256=3116b53f16c02d5f4681edf9073b4db74fdd306fdc535dab2270a46faaba0dcd
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  # Skip upstream CMake targets; compile the two library sources below.
+  SOURCE_SUBDIR dtcc-unused-upstream-cmake
+)
+FetchContent_MakeAvailable(tetgen)
+set(TETGEN_DIR "${tetgen_SOURCE_DIR}")
+set(TETGEN_SOURCES "${TETGEN_DIR}/tetgen.cxx" "${TETGEN_DIR}/predicates.cxx")
 
 add_library(tet STATIC ${TETGEN_SOURCES})
 target_compile_definitions(tet PUBLIC TETLIBRARY)
@@ -49,14 +36,17 @@ endif()
 pybind11_add_module(_tetwrap tetwrap.cpp)
 target_link_libraries(_tetwrap PRIVATE tet)
 
-get_filename_component(_TETWRAP_BUILD_PARENT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-get_filename_component(_TETWRAP_BUILD_PARENT "${_TETWRAP_BUILD_PARENT}/.." ABSOLUTE)
-
-set_target_properties(_tetwrap PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY "${_TETWRAP_BUILD_PARENT}"
-  RUNTIME_OUTPUT_DIRECTORY "${_TETWRAP_BUILD_PARENT}"
-  ARCHIVE_OUTPUT_DIRECTORY "${_TETWRAP_BUILD_PARENT}"
+install(TARGETS _tetwrap
+  LIBRARY DESTINATION dtcc_tetgen_wrapper
+  RUNTIME DESTINATION dtcc_tetgen_wrapper
 )
+install(FILES "${TETGEN_DIR}/LICENSE"
+  DESTINATION dtcc_tetgen_wrapper/licenses RENAME TetGen-LICENSE.txt)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../../LICENSE"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../THIRD_PARTY_NOTICES.md"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../licenses/pybind11-LICENSE.txt"
+  DESTINATION dtcc_tetgen_wrapper/licenses)
 
 if(MSVC)
   target_compile_options(tet PRIVATE /W4)

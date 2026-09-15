@@ -16,23 +16,35 @@ Usage notes and examples are provided in this README, in
 
 ## Installation
 
-Install from PyPI:
+Install directly from Git with uv:
 
 ```bash
-pip install dtcc-tetgen-wrapper
+uv add "dtcc-tetgen-wrapper @ git+https://github.com/dtcc-platform/dtcc-tetgen-wrapper.git"
 ```
 
-To build from source, first vendor TetGen into the package:
+uv records the resolved Git commit in the consuming project's lockfile. For an
+explicit revision, append `@<commit>` to the Git URL. This repository distributes
+from Git; it does not publish PyPI packages or GitHub release artifacts.
+
+A C++17 compiler and internet access for build dependencies and the fixed TetGen
+archive are required. CMake downloads TetGen into the build directory and verifies
+its SHA256 before compilation. The single source pin is in
+[`CMakeLists.txt`](dtcc_tetgen_wrapper/cpp/tetwrap/CMakeLists.txt).
+No manual vendoring step is needed.
+
+For development:
 
 ```bash
 git clone https://github.com/dtcc-platform/dtcc-tetgen-wrapper.git
 cd dtcc-tetgen-wrapper
-./vendor_tetgen.sh
-pip install .
+uv sync --locked
+uv run --locked pytest tests
+uv build
 ```
 
-If you want a different TetGen version, set `TETGEN_VERSION` before running
-`vendor_tetgen.sh`.
+`uv sync` rebuilds when native source or CMake configuration changes. `uv build`
+uses isolated build dependencies and builds a wheel from the source distribution.
+The installed package includes `_tetwrap` and license/third-party notices.
 
 ## Usage
 
@@ -109,7 +121,7 @@ parameters, use `tetgen_switches=...`.
 Run the wrapper test suite with:
 
 ```bash
-pytest tests
+uv run --locked pytest tests
 ```
 
 The wrapper writes native TetGen repro files on failure, including a `.poly`
@@ -125,8 +137,8 @@ file, so failing inputs can be reproduced directly with the TetGen CLI.
 This project is licensed under the
 [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.en.html).
 
-TetGen itself is also AGPL-licensed. Any software using this wrapper must
-comply with the AGPL terms.
+See [LICENSE](LICENSE) for the full license and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for upstream notices.
 
 ## Community guidelines
 

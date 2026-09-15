@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-    "scikit-build-core>=0.8.0",
+    "scikit-build-core>=0.10",
     "pybind11>=2.11",
     "numpy>=1.22",
     "packaging",
@@ -13,6 +13,7 @@ version = "0.1.0"
 description = "Pybind11-powered TetGen bindings with a lightweight Python adapter."
 readme = "README.md"
 requires-python = ">=3.9"
+license = { file = "LICENSE" }
 authors = [
     { name = "DTCC Developers" },
 ]
@@ -32,14 +33,25 @@ Repository = "https://github.com/dtcc-platform/dtcc-tetgen-wrapper"
 "Bug Tracker" = "https://github.com/dtcc-platform/dtcc-tetgen-wrapper/issues"
 
 [tool.scikit-build]
-cmake.version = ">=3.18"
+cmake.version = ">=3.24"
 cmake.source-dir = "dtcc_tetgen_wrapper/cpp/tetwrap"
 wheel.packages = ["dtcc_tetgen_wrapper"]
 sdist.include = [
-    "README.md",
-    "MANIFEST.in",
-    "dtcc_tetgen_wrapper",
+    "/README.md",
+    "/LICENSE",
+    "/THIRD_PARTY_NOTICES.md",
+    "/licenses/*.txt",
+    "/dtcc_tetgen_wrapper/*.py",
+    "/dtcc_tetgen_wrapper/cpp/tetwrap/CMakeLists.txt",
+    "/dtcc_tetgen_wrapper/cpp/tetwrap/tetwrap.cpp",
+    "/tests/*.py",
+    "/uv.lock",
 ]
+
+# Exclude legacy local vendor/binary artifacts even from a developer checkout.
+sdist.exclude = ["dtcc_tetgen_wrapper/cpp/tetgen/**", "**/*.so", "**/*.pyd", "**/__pycache__/**", ".pytest_cache/**"]
+
+wheel.exclude = ["dtcc_tetgen_wrapper/cpp/**"]
 
 [tool.scikit-build.cmake.define]
 PYBIND11_FINDPYTHON = "ON"
@@ -82,4 +94,17 @@ exclude_lines = [
     "raise AssertionError",
     "raise NotImplementedError",
     "if TYPE_CHECKING:",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-cov", "pytest-timeout"]
+lint = ["flake8", "mypy", "black", "isort", "pylint"]
+docs = ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-napoleon"]
+quality = ["pre-commit", "bandit"]
+
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "dtcc_tetgen_wrapper/cpp/tetwrap/CMakeLists.txt" },
+    { file = "dtcc_tetgen_wrapper/cpp/tetwrap/tetwrap.cpp" },
 ]

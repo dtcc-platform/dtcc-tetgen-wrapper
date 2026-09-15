@@ -296,8 +296,15 @@ def test_native_box_smoke_reports_effective_switches() -> None:
     )
 
     assert io.points.shape[1] == 3
-    assert io.tets.shape[1] == 4
+    assert np.isfinite(io.points).all()
+    assert io.tets.shape[1] == 4 and len(io.tets) > 0
+    assert io.tets.min() >= 0 and io.tets.max() < len(io.points)
+    tetrahedra = io.points[io.tets]
+    volumes = np.abs(np.linalg.det(tetrahedra[:, 1:] - tetrahedra[:, :1])) / 6
+    assert (volumes > 0).all()
+    np.testing.assert_allclose(volumes.sum(), 1.0)
     assert io.boundary_tri_faces is not None
     assert io.boundary_tri_faces.shape[1] == 3
+    assert len(io.boundary_tri_markers) == len(io.boundary_tri_faces)
     assert set(np.unique(io.boundary_tri_markers)).issuperset({-1, -2, -3, -4, -5, -6})
     assert io.switches == "pQnf"

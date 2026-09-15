@@ -31,33 +31,13 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install scikit-build-core[pyproject] pybind11 numpy packaging
-
-    # Non-Windows: use the bash script
-    - name: Download TetGen sources (non-Windows)
-      if: runner.os != 'Windows'
-      run: bash vendor_tetgen.sh
-
-    # Windows: use your PowerShell script
-    - name: Download TetGen sources (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: ./vendor_tetgen.ps1
-
+    - uses: astral-sh/setup-uv@v6
     - name: Build and install package
-      run: |
-        pip install -v .
-
-    - name: Install test dependencies
-      run: |
-        pip install pytest pytest-cov pytest-timeout
+      run: uv sync --locked
 
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=dtcc_tetgen_wrapper --cov-report=term-missing --cov-report=xml
+        uv run --locked pytest tests/ -v --cov=dtcc_tetgen_wrapper --cov-report=term-missing --cov-report=xml
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
@@ -80,74 +60,25 @@ jobs:
       with:
         python-version: '3.11'
 
+    - uses: astral-sh/setup-uv@v6
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 mypy black isort pylint
-        pip install numpy  # For type checking
+      run: uv sync --locked --group lint
 
     - name: Run black
       run: |
-        black --check --diff dtcc_tetgen_wrapper tests
+        uv run --locked --group lint black --check --diff dtcc_tetgen_wrapper tests
 
     - name: Run isort
       run: |
-        isort --check-only --diff dtcc_tetgen_wrapper tests
+        uv run --locked --group lint isort --check-only --diff dtcc_tetgen_wrapper tests
 
     - name: Run flake8
       run: |
-        flake8 dtcc_tetgen_wrapper tests --max-line-length=120 --extend-ignore=E203,W503
+        uv run --locked --group lint flake8 dtcc_tetgen_wrapper tests --max-line-length=120 --extend-ignore=E203,W503
 
     - name: Run mypy
       run: |
-        mypy dtcc_tetgen_wrapper --ignore-missing-imports
-
-  build-wheels:
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install cibuildwheel
-      run: python -m pip install cibuildwheel
-
-    - name: Download TetGen (Unix)
-      if: runner.os != 'Windows'
-      run: bash vendor_tetgen.sh
-
-    - name: Download TetGen (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        # Windows-specific TetGen download
-        # This would need to be implemented for Windows support
-        echo "Windows build not yet implemented"
-        exit 1
-      continue-on-error: true
-
-    - name: Build wheels
-      run: python -m cibuildwheel --output-dir wheelhouse
-      env:
-        CIBW_BUILD: cp310-* cp311-* cp312-*
-        CIBW_SKIP: "*-musllinux_* *i686 *win32"
-        CIBW_BEFORE_BUILD: bash vendor_tetgen.sh || true
-        CIBW_TEST_REQUIRES: pytest
-        CIBW_TEST_COMMAND: "pytest {project}/tests -v"
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: wheels-${{ matrix.os }}
-        path: ./wheelhouse/*.whl
+        uv run --locked --group lint mypy dtcc_tetgen_wrapper --ignore-missing-imports
 
   docs:
     name: Build Documentation
@@ -161,46 +92,20 @@ jobs:
       with:
         python-version: '3.11'
 
+    - uses: astral-sh/setup-uv@v6
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install sphinx sphinx_rtd_theme sphinxcontrib-napoleon
-        pip install scikit-build-core[pyproject] pybind11 numpy packaging
-        bash vendor_tetgen.sh
-        pip install -v .
+      run: uv sync --locked --group docs
 
     - name: Build docs
       run: |
         cd docs || mkdir docs
         if [ ! -f conf.py ]; then
-          sphinx-quickstart -q -p "dtcc-tetgen-wrapper" -a "DTCC Platform" -v "0.2.0" --ext-autodoc --ext-napoleon --makefile
+          uv run --locked --group docs sphinx-quickstart -q -p "dtcc-tetgen-wrapper" -a "DTCC Platform" -v "0.2.0" --ext-autodoc --ext-napoleon --makefile
         fi
-        sphinx-build -b html . _build/html
+        uv run --locked --group docs sphinx-build -b html . _build/html
 
     - name: Upload documentation
       uses: actions/upload-artifact@v4
       with:
         name: documentation
         path: docs/_build/html
-
-  release:
-    name: Release
-    needs: [test, build-wheels]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: dist
-        pattern: wheels-*
-        merge-multiple: true
-
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
-        skip-existing: true
